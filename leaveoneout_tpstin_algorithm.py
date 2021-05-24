@@ -32,10 +32,20 @@ __revision__ = '$Format:%H$'
 
 from qgis.PyQt.QtCore import QCoreApplication
 from qgis.core import (QgsProcessing,
-                       QgsFeatureSink,
                        QgsProcessingAlgorithm,
                        QgsProcessingParameterFeatureSource,
-                       QgsProcessingParameterFeatureSink)
+                       QgsProcessingParameterField,
+                       QgsProcessingParameterNumber,
+                       QgsProcessingParameterEnum,
+                       QgsProcessingParameterBolean,
+                       QgsProcessingParameterExtent,
+                       QgsProcessingParameterRasterDestination,
+                       QgsProcessingParameterFileDestination,
+                       QgsProcessingUtils,
+                       QgsRasterLayer,
+                       QgsPointXY)
+
+import processing
 
 
 class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
@@ -56,8 +66,18 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
     # used when calling the algorithm from another algorithm, or when
     # calling from the QGIS console.
 
-    OUTPUT = 'OUTPUT'
-    INPUT = 'INPUT'
+    SHAPES = "SHAPES"
+    FIELD = "FIELD"
+    TARGET = "TARGET"
+    REGULARISATION = "REGULARISATION"
+    LEVEL = "LEVEL"
+    FRAME = "FRAME"
+    OUTPUT_EXTENT = "OUTPUT_EXTENT"
+    TARGET_USER_SIZE = "TARGET_USER_SIZE"
+    TARGET_USER_FITS = "TARGET_USER_FITS"
+    TARGET_OUT_GRID = "TARGET_OUT_GRID"
+    INTERPOLATION_RESULT = "INTERPOLATION_RESULT"
+    OUTPUT_DATA = "OUTPUT_DATA"
 
     def initAlgorithm(self, config):
         """
@@ -69,9 +89,9 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
         # geometry.
         self.addParameter(
             QgsProcessingParameterFeatureSource(
-                self.INPUT,
-                self.tr('Input layer'),
-                [QgsProcessing.TypeVectorAnyGeometry]
+                self.SHAPES,
+                self.tr('Input vector point layer'),
+                [QgsProcessing.TypeVectorPoint]
             )
         )
 
@@ -79,9 +99,88 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
         # usually takes the form of a newly created vector layer when the
         # algorithm is run in QGIS).
         self.addParameter(
-            QgsProcessingParameterFeatureSink(
-                self.OUTPUT,
-                self.tr('Output layer')
+            QgsProcessingParameterField(
+                self.FIELD,
+                self.tr('Field to interpolate'),
+                "",
+                self.SHAPES
+            )
+        )
+
+        self.addParameter(
+            QgsProcessingParameterNumber(
+                self.REGULARISATION,
+                self.tr("Regularisation of interpolation"),
+                QgsProcessingParameterNumber.Double,
+                defaultValue=0.0001,
+                minValue=0
+            )
+        )
+
+        self.addParameter(
+            QgsProcessingParameterEnum(
+                self.LEVEL,
+                self.tr("Decide for your level of Neighourhood"),
+                options=[
+                    self.tr("[0] immediate"),
+                    self.tr("[1] Level 1"),
+                    self.tr("[2] Level 2")
+                ],
+                defaultValue=2,
+            )
+        )
+
+        self.addParameter(
+            QgsProcessingParameterBolean(
+                self.FRAME,
+                self.tr("Frame"),
+                defaultValue=1,
+            )
+        )
+
+        self.addParameter(
+            QgsProcessingParameterExtent(
+                self.OUTPUT_EXTENT,
+                self.tr("define the output extent"),
+                optional=1,
+            )
+        )
+
+        self.addParameter(
+            QgsProcessingParameterNumber(
+                self.TARGET_USER_SIZE,
+                self.tr("Cellsize"),
+                QgsProcessingParameterNumber.Double,
+                defalutValue=100,
+            )
+        )
+
+        self.addParameter(
+            QgsProcessingParameterEnum(
+                self.TARGET_USER_FITS,
+                self.tr("Fit - where to fit the interpolation to"),
+                options=[
+                    self.tr("[0] noder"),
+                    self.tr("[1] cells")
+                ],
+                defaultValue=0
+            )
+        )
+
+        # add outputs for interpolated raster and validation data
+        self.addParameter(
+            QgsProcessingParameterRasterDestination(
+                self.INTERPOLATION_RESULT,
+                self.tr("Interpolation raster output layer, actively change/chosse the output. Take care that a permanent file must be an .sdat file becuase of the saga module"),
+                'sdat files (*.sdat)'
+            )
+        )
+
+        self.addParameter(
+            QgsProcessingParameterFileDestination(
+                self.OUTPUT_DATA,
+                self.tr("Output for validation data as .txt file"),
+                'txt file (*.txt)'
             )
         )
 
@@ -90,36 +189,142 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
         Here is where the processing itself takes place.
         """
 
-        # Retrieve the feature source and sink. The 'dest_id' variable is used
-        # to uniquely identify the feature sink, and must be included in the
-        # dictionary returned by the processAlgorithm function.
-        source = self.parameterAsSource(parameters, self.INPUT, context)
-        (sink, dest_id) = self.parameterAsSink(parameters, self.OUTPUT,
-                context, source.fields(), source.wkbType(), source.sourceCrs())
+        val_txt = self.parameterAsFileOutput(parameters, self.OUTPUT_DATA, context)
+        parameters['TARGET_OUT_GRID'] = parameters['INTERPOLATION_RESULT']
+        int_raster = processing.run(
+            "saga:thinplatesplinetin",
+            parameters,
+            context=context,
+            feedback=feedback
+        )
+        int_result = int_raster['TARGET_OUT_GRID']
 
-        # Compute the number of steps to display within the progress bar and
-        # get features from source
-        total = 100.0 / source.featureCount() if source.featureCount() else 0
-        features = source.getFeatures()
+        point_input = self.parameterAsLayer(parameters, self.SHAPES, context)
+        int_field = self.parameterAsString(parameters, self.FIELD, context)
+        regularisation = self.parameterAsDouble(parameters, self.REGULARISATION, context)
+        neighbourhood = self.parametersAsEnum(parameters, self.LEVEL, context)
+        if neighbourhood == 0:
+            neighbourhood = 'immediate'
+        elif neighbourhood == 1:
+            neighbourhood = 'Level 1'
+        elif neighbourhood == 2:
+            neighbourhood = 'Level 2'
+        frame = self.parameterAsBool(parameters, self.FRAME, context)
+        extent = self.parameterAsExtent(parameters, self.OUTPUT_EXTENT, context)
+        cellsize = self.parameterAsDouble(parameters, self.TARGET_USER_SIZE, context)
+        fit = self.parameterAsEnum(parameters, self.TARGET_USER_FITS, context)
+        if fit == 0:
+            fit = 'nodes'
+        elif fit == 1:
+            fit = 'cells'
+        data_out = self.paramterAsString(parameters, self.OUTPUT_DATA, context)
 
-        for current, feature in enumerate(features):
-            # Stop the algorithm if cancel button has been clicked
+        fieldnames = [field.names() for field in point_input.fields()]
+
+        gen_info = (
+            'Input Layer: {}'.format(point_input.name()),
+            str(point_input.crs()),
+            'Interpolation field: {}'.format(int_field),
+            'Features in input layer: {}'.format(point_input.feateCount())
+        )
+        int_info = (
+            'Interpolation method: SAGA Thin plate spline (tin)',
+            'Interpolation result path: {}'.format(int_result)
+        )
+        int_params = (
+            'Regularisation: {}'.format(regularisation),
+            'Neighbourhood: {}'.format(neighbourhood),
+            'Frame: {}'.format(frame),
+            'Output extent (xmin, ymin : xmax, ymax): {}'.format(extent.toString()),
+            'Cellsize: {}'.format(cellsize),
+            'Interpolation is fit to: {}'.format(fit)
+        )
+        header = (
+            fieldnames[0],
+            'x_coord',
+            'y_coord',
+            int_field,
+            'leave one out grid value',
+            'd_Poi_Interpolation'
+        )
+
+        with open(val_txt, 'w') as output_txt:
+            line = ';'.join(int_info) + '\n'
+            output_txt.write(line)
+            line2 = ';'.join(gen_info) + '\n'
+            output_txt.write(line2)
+            line3 = ';'.join(int_params) + '\n'
+            output_txt.write(line3)
+            line4 = ';'.join(header) + '\n'
+            output_txt.write(line4)
+        
+        parameters['TARGET_OUT_GRID'] = QgsProcessing.TEMPORARY_OUTPUT
+
+        features = point_input.getFeatures()
+        total = 100.0/point_input.featureCount() if point_input.featureCount() else 0
+
+        for current, feat in enumerate(features):
             if feedback.isCanceled():
                 break
-
-            # Add a feature in the sink
-            sink.addFeature(feature, QgsFeatureSink.FastInsert)
-
-            # Update the progress bar
             feedback.setProgress(int(current * total))
 
-        # Return the results of the algorithm. In this case our only result is
-        # the feature sink which contains the processed features, but some
-        # algorithms may return multiple feature sinks, calculated numeric
-        # statistics, etc. These should all be included in the returned
-        # dictionary, with keys matching the feature corresponding parameter
-        # or output names.
-        return {self.OUTPUT: dest_id}
+            point_input.select(feat.id())
+            point_input.invertSelection()
+            tempfile = QgsProcessingUtils.generateTempFilename(str(feat.id())) + '.shp'
+            print(tempfile)
+            poi_clone = processing.run(
+                "native:saveselectedfeatures", {
+                    'INPUT': point_input,
+                    'OUPUT': tempfile
+                }, 
+                context=context,
+                feedback=feedback
+            )['OUTPUT']
+            parameters['SHAPES'] = poi_clone
+            val_int = processing.run(
+                "saga:thinplatesplinetin",
+                parameters,
+                context=context,
+                feedback=feedback
+            )
+            print(val_int['TARGET_OUT_GRID'])
+            valraster = QgsRasterLayer(
+                val_int['TARGET_OUT_GRID'],
+                'valint_raster',
+                'gdal'
+            )
+            point_input.removeSelection()
+
+            poi_value = feat.attribute(str(int_field))
+            geom = feat.geometry()
+            valraster_value, res = valraster.dataProvider().sample(
+                QgsPointXY(geom.asPoint().x(), geom.asPoint().y()),
+                1
+            )
+            if res == False:
+                delta = 'NaN'
+            elif res == True:
+                delta = poi_value - valraster_value
+            else:
+                print('something went horribly wrong here :(')
+            
+            txtdata = (
+                str(feat.attribute(0)),
+                '{:.4f}'.format(geom.asPoint().x()),
+                '{:.4f}'.format(geom.asPoint().y()),
+                str(feat.attribute(int_field)),
+                str(valraster_value),
+                str(delta)
+            )
+            with open(val_txt, 'a') as output_txt:
+                data = ';'.join(txtdata) + '\n'
+                output_txt.write(data)
+            
+
+        return {
+            self.INTERPOLATION_RESULT: int_result,
+            self.OUTPUT_DATA: val_txt
+        }
 
     def name(self):
         """
