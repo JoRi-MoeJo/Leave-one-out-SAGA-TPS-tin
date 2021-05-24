@@ -37,7 +37,7 @@ from qgis.core import (QgsProcessing,
                        QgsProcessingParameterField,
                        QgsProcessingParameterNumber,
                        QgsProcessingParameterEnum,
-                       QgsProcessingParameterBolean,
+                       QgsProcessingParameterBoolean,
                        QgsProcessingParameterExtent,
                        QgsProcessingParameterRasterDestination,
                        QgsProcessingParameterFileDestination,
@@ -131,7 +131,7 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
         )
 
         self.addParameter(
-            QgsProcessingParameterBolean(
+            QgsProcessingParameterBoolean(
                 self.FRAME,
                 self.tr("Frame"),
                 defaultValue=1,
@@ -151,7 +151,7 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
                 self.TARGET_USER_SIZE,
                 self.tr("Cellsize"),
                 QgsProcessingParameterNumber.Double,
-                defalutValue=100,
+                defaultValue=100,
             )
         )
 
@@ -160,7 +160,7 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
                 self.TARGET_USER_FITS,
                 self.tr("Fit - where to fit the interpolation to"),
                 options=[
-                    self.tr("[0] noder"),
+                    self.tr("[0] nodes"),
                     self.tr("[1] cells")
                 ],
                 defaultValue=0
@@ -202,7 +202,7 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
         point_input = self.parameterAsLayer(parameters, self.SHAPES, context)
         int_field = self.parameterAsString(parameters, self.FIELD, context)
         regularisation = self.parameterAsDouble(parameters, self.REGULARISATION, context)
-        neighbourhood = self.parametersAsEnum(parameters, self.LEVEL, context)
+        neighbourhood = self.parameterAsEnum(parameters, self.LEVEL, context)
         if neighbourhood == 0:
             neighbourhood = 'immediate'
         elif neighbourhood == 1:
@@ -217,15 +217,15 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
             fit = 'nodes'
         elif fit == 1:
             fit = 'cells'
-        data_out = self.paramterAsString(parameters, self.OUTPUT_DATA, context)
+        data_out = self.parameterAsString(parameters, self.OUTPUT_DATA, context)
 
-        fieldnames = [field.names() for field in point_input.fields()]
+        fieldnames = [field.name() for field in point_input.fields()]
 
         gen_info = (
             'Input Layer: {}'.format(point_input.name()),
             str(point_input.crs()),
             'Interpolation field: {}'.format(int_field),
-            'Features in input layer: {}'.format(point_input.feateCount())
+            'Features in input layer: {}'.format(point_input.featureCount())
         )
         int_info = (
             'Interpolation method: SAGA Thin plate spline (tin)',
@@ -275,7 +275,7 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
             poi_clone = processing.run(
                 "native:saveselectedfeatures", {
                     'INPUT': point_input,
-                    'OUPUT': tempfile
+                    'OUTPUT': tempfile
                 }, 
                 context=context,
                 feedback=feedback
@@ -302,7 +302,7 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
                 1
             )
             if res == False:
-                delta = 'NaN'
+                delta = 'NaN - not in interpolated area'
             elif res == True:
                 delta = poi_value - valraster_value
             else:
