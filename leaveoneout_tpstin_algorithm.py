@@ -49,18 +49,6 @@ import processing
 
 
 class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
-    """
-    This is an example algorithm that takes a vector layer and
-    creates a new identical one.
-
-    It is meant to be used as an example of how to create your own
-    algorithms and explain methods and variables used to do it. An
-    algorithm like this will be available in all elements, and there
-    is not need for additional work.
-
-    All Processing algorithms should extend the QgsProcessingAlgorithm
-    class.
-    """
 
     # Constants used to refer to parameters and outputs. They will be
     # used when calling the algorithm from another algorithm, or when
@@ -80,10 +68,6 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
     OUTPUT_DATA = "OUTPUT_DATA"
 
     def initAlgorithm(self, config):
-        """
-        Here we define the inputs and output of the algorithm, along
-        with some other properties.
-        """
 
         # We add the input vector features source. It can have any kind of
         # geometry.
@@ -95,9 +79,6 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
             )
         )
 
-        # We add a feature sink in which to store our processed features (this
-        # usually takes the form of a newly created vector layer when the
-        # algorithm is run in QGIS).
         self.addParameter(
             QgsProcessingParameterField(
                 self.FIELD,
@@ -189,7 +170,10 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
         Here is where the processing itself takes place.
         """
 
+        #instantiating validation text file destination
+        #interpolating the surface from the whole data set (int_raster)
         val_txt = self.parameterAsFileOutput(parameters, self.OUTPUT_DATA, context)
+        #applying output directory for saga module
         parameters['TARGET_OUT_GRID'] = parameters['INTERPOLATION_RESULT']
         int_raster = processing.run(
             "saga:thinplatesplinetin",
@@ -199,6 +183,7 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
         )
         int_result = int_raster['TARGET_OUT_GRID']
 
+        #instantiating relevant data for validation output data
         point_input = self.parameterAsLayer(parameters, self.SHAPES, context)
         int_field = self.parameterAsString(parameters, self.FIELD, context)
         regularisation = self.parameterAsDouble(parameters, self.REGULARISATION, context)
@@ -217,10 +202,11 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
             fit = 'nodes'
         elif fit == 1:
             fit = 'cells'
-        data_out = self.parameterAsString(parameters, self.OUTPUT_DATA, context)
-
+        
+        #getting fieldnames of point input layer
         fieldnames = [field.name() for field in point_input.fields()]
-
+        
+        #writing the text lines for the validation data text file with intantiated parameters
         gen_info = (
             'Input Layer: {}'.format(point_input.name()),
             str(point_input.crs()),
@@ -247,7 +233,8 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
             'leave one out grid value',
             'd_IntVal(exp)_PoiVal(true)'
         )
-
+        
+        #writing information and header into validation text file
         with open(val_txt, 'w') as output_txt:
             line = ';'.join(int_info) + '\n'
             output_txt.write(line)
@@ -258,19 +245,23 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
             line4 = ';'.join(header) + '\n'
             output_txt.write(line4)
         
+        #changing output directory of saga module for validation steps to temporary files
         parameters['TARGET_OUT_GRID'] = QgsProcessing.TEMPORARY_OUTPUT
 
         features = point_input.getFeatures()
         total = 100.0/point_input.featureCount() if point_input.featureCount() else 0
-
+        
+        #loop for validation through every point feature of input layer
         for current, feat in enumerate(features):
             if feedback.isCanceled():
                 break
             feedback.setProgress(int(current * total))
-
+            
+            #creating a point_clone with the one missing feature to validate
             point_input.select(feat.id())
             point_input.invertSelection()
             tempfile = QgsProcessingUtils.generateTempFilename(str(feat.id())) + '.shp'
+            #printing point_clone file location to console
             print(tempfile)
             poi_clone = processing.run(
                 "native:saveselectedfeatures", {
@@ -280,6 +271,7 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
                 context=context,
                 feedback=feedback
             )['OUTPUT']
+            #defining the point_clone as input for the validation interpolation of saga module + running the interpolation with missing feature
             parameters['SHAPES'] = poi_clone
             val_int = processing.run(
                 "saga:thinplatesplinetin",
@@ -287,6 +279,7 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
                 context=context,
                 feedback=feedback
             )
+            #printing validation interpolation file path of the point clone to console
             print(val_int['TARGET_OUT_GRID'])
             valraster = QgsRasterLayer(
                 val_int['TARGET_OUT_GRID'],
@@ -295,12 +288,16 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
             )
             point_input.removeSelection()
 
+            #accessing field value of missing feature from input layer
             poi_value = feat.attribute(str(int_field))
             geom = feat.geometry()
+            #accessing raster value at point of feature from input layer
             valraster_value, res = valraster.dataProvider().sample(
                 QgsPointXY(geom.asPoint().x(), geom.asPoint().y()),
                 1
             )
+            #checking if point is part of raster
+            #if so, calculating the delta of expected value (validation interpolation) - true value(input layer feature value)
             if res == False:
                 delta = 'NaN - not in interpolated area'
             elif res == True:
@@ -308,6 +305,7 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
             else:
                 print('something went horribly wrong here :(')
             
+            #writing necessary documentation data + validation delta into validation text data file
             txtdata = (
                 str(feat.attribute(0)),
                 '{:.4f}'.format(geom.asPoint().x()),
@@ -319,8 +317,8 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
             with open(val_txt, 'a') as output_txt:
                 data = ';'.join(txtdata) + '\n'
                 output_txt.write(data)
-            
-
+        
+        #returning interpolated raster for data set + validation data set user directories
         return {
             self.INTERPOLATION_RESULT: int_result,
             self.OUTPUT_DATA: val_txt
