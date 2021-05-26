@@ -245,7 +245,7 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
             'y_coord',
             int_field,
             'leave one out grid value',
-            'd_Poi_Interpolation'
+            'd_IntVal(exp)_PoiVal(true)'
         )
 
         with open(val_txt, 'w') as output_txt:
@@ -304,7 +304,7 @@ class InterpolationValidationAlgorithm(QgsProcessingAlgorithm):
             if res == False:
                 delta = 'NaN - not in interpolated area'
             elif res == True:
-                delta = poi_value - valraster_value
+                delta = valraster_value - poi_value
             else:
                 print('something went horribly wrong here :(')
             
