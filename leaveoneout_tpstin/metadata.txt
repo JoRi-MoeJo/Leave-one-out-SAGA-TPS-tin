@@ -12,8 +12,8 @@ email=johannes.ritter95@web.de
 
 about=Plugin for the validation with the leave one out method for the interpolation with the saga module thinplatesplie (tin)
 
-tracker=http://bugs
-repository=http://repo
+tracker=https://github.com/JoRi-MoeJo/leaveoneout_tpstin/issues
+repository=https://github.com/JoRi-MoeJo/leaveoneout_tpstin
 # End of mandatory metadata
 
 # Recommended items:
