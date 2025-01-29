@@ -8,7 +8,7 @@ qgisMinimumVersion=3.0
 description=leave one out validation for the interpolation method thinplatespline (tin) from the SAGA console
 version=0.1
 author=Johannes Ritter
-email=johannes.ritter95@web.de
+email=
 
 about=Plugin for the validation with the leave one out method for the interpolation with the saga module thinplatesplie (tin)
 
